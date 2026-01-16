@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>40Agent - AI VM Controller</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- VM Display (Full Screen) -->
+    <div id="vm-container">
+        <canvas id="vm-canvas"></canvas>
+        <div id="connection-status">Connecting...</div>
+    </div>
+
+    <!-- Avatar (Bottom Right) -->
+    <div id="avatar-container">
+        <canvas id="avatar-canvas"></canvas>
+        <div id="avatar-status"></div>
+    </div>
+
+    <!-- Chat Interface (Hidden by default, press 't' to toggle) -->
+    <div id="chat-container" class="hidden">
+        <div id="chat-header">
+            <span>40Agent Chat</span>
+            <button id="chat-close">&times;</button>
+        </div>
+        <div id="chat-messages"></div>
+        <div id="chat-input-container">
+            <input type="text" id="chat-input" placeholder="Type a message... (Enter to send)">
+            <button id="chat-send">Send</button>
+        </div>
+    </div>
+
+    <!-- Agent Status Overlay -->
+    <div id="agent-status" class="hidden">
+        <div id="status-indicator"></div>
+        <span id="status-text"></span>
+    </div>
+
+    <!-- Keyboard Shortcut Hint -->
+    <div id="shortcut-hint">
+        Press <kbd>T</kbd> to chat
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

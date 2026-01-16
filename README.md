@@ -18,18 +18,16 @@ AI Agent that can see and control virtual machines using Qwen3-omni multimodal m
 cp .env.example .env
 # .env 파일 열어서 DASHSCOPE_API_KEY 입력
 
-# 2. QEMU VM 시작 (별도 터미널)
-./scripts/start-vm.sh
-
-# 3. 40Agent 실행
+# 2. 실행 - VM 자동 시작됨
 python run.py
 ```
 
-The script will:
+That's it! The script will:
 1. Install `uv` if not present
 2. Create virtual environment
 3. Install all dependencies
-4. Start the server on http://localhost:8040
+4. Start QEMU VM automatically (if disk exists)
+5. Start the server on http://localhost:8040
 
 ## Requirements
 
@@ -64,7 +62,8 @@ DASHSCOPE_API_KEY=sk-your-api-key-here
 
 # Optional
 VM_NAME=40agent-vm
-VM_QMP_SOCKET=/tmp/qemu-40agent-vm-qmp.sock
+VM_MEMORY=4096
+VM_CPUS=2
 SERVER_PORT=8040
 OMNI_VOICE=Chelsie
 ```
@@ -73,7 +72,7 @@ OMNI_VOICE=Chelsie
 
 ```
 40Agent/
-├── run.py              # Entry point (auto-setup + launch)
+├── run.py              # Entry point (auto-setup + VM launch)
 ├── pyproject.toml      # Dependencies & project config
 ├── src/
 │   ├── agent/          # AI agent core (Qwen3-omni client)
@@ -85,7 +84,7 @@ OMNI_VOICE=Chelsie
 ├── web/                # Web interface (HTML/CSS/JS)
 ├── character/          # Inochi2D avatar files (.inx)
 ├── model/              # Local model files (if any)
-└── vm_data/            # VM disk images & configs
+└── vm_data/            # VM disk images
 ```
 
 ## Usage
@@ -120,50 +119,24 @@ The agent uses these tools (in XML format):
 
 ## VM Setup
 
-### Starting QEMU VM
-
-40Agent connects to QEMU via QMP socket. Start your VM with QMP enabled:
-
-```bash
-qemu-system-x86_64 \
-  -name 40agent-vm \
-  -m 4096 \
-  -smp 2 \
-  -hda vm_data/40agent-vm.qcow2 \
-  -qmp unix:/tmp/qemu-40agent-vm-qmp.sock,server,nowait \
-  -device virtio-vga \
-  -display gtk
-```
-
-Or use the helper script:
-
-```bash
-./scripts/start-vm.sh
-```
-
-### Creating a New VM
+### Creating a VM Disk
 
 ```bash
 # Create disk image
+mkdir -p vm_data
 qemu-img create -f qcow2 vm_data/40agent-vm.qcow2 20G
 
-# Install from ISO
+# Install OS from ISO (run manually once)
 qemu-system-x86_64 \
-  -name 40agent-vm \
-  -m 4096 \
-  -smp 2 \
+  -m 4096 -smp 2 \
   -hda vm_data/40agent-vm.qcow2 \
-  -cdrom pearOS-NiceC0re-25-12.iso \
+  -cdrom your-os.iso \
   -boot d \
-  -qmp unix:/tmp/qemu-40agent-vm-qmp.sock,server,nowait \
   -device virtio-vga \
   -display gtk
 ```
 
-### VM Configuration
-
-- Resolution: 1920x1080
-- QMP socket: `/tmp/qemu-40agent-vm-qmp.sock`
+After installation, `python run.py` will automatically start the VM.
 
 ## API Reference
 

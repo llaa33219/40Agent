@@ -1,34 +1,38 @@
 #!/usr/bin/env python3
 """
 40Agent - AI Agent that can see and control VMs
-Entry point with automatic uv environment setup
+Entry point with automatic uv environment setup and VM management
 """
 
 import os
 import subprocess
 import sys
+import signal
+import time
+import atexit
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.resolve()
 VENV_PATH = PROJECT_ROOT / ".venv"
 UV_LOCK = PROJECT_ROOT / "uv.lock"
+VM_DATA_DIR = PROJECT_ROOT / "vm_data"
+
+VM_NAME = os.environ.get("VM_NAME", "40agent-vm")
+QMP_SOCKET = os.environ.get("VM_QMP_SOCKET", f"/tmp/qemu-{VM_NAME}-qmp.sock")
+VM_DISK = VM_DATA_DIR / f"{VM_NAME}.qcow2"
+
+qemu_process = None
 
 
 def check_uv_installed() -> bool:
-    """Check if uv is installed"""
     try:
-        subprocess.run(
-            ["uv", "--version"],
-            capture_output=True,
-            check=True,
-        )
+        subprocess.run(["uv", "--version"], capture_output=True, check=True)
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
 
 def install_uv() -> None:
-    """Install uv using the official installer"""
     print("📦 Installing uv...")
     try:
         subprocess.run(
@@ -54,16 +58,9 @@ def install_uv() -> None:
 
 
 def setup_environment() -> None:
-    """Setup the virtual environment and install dependencies"""
     print("🔧 Setting up environment...")
-
-    # Create venv and sync dependencies using uv
     try:
-        subprocess.run(
-            ["uv", "sync"],
-            cwd=PROJECT_ROOT,
-            check=True,
-        )
+        subprocess.run(["uv", "sync"], cwd=PROJECT_ROOT, check=True)
         print("✅ Environment ready")
     except subprocess.CalledProcessError as e:
         print(f"❌ Failed to setup environment: {e}")
@@ -71,54 +68,127 @@ def setup_environment() -> None:
 
 
 def get_venv_python() -> Path:
-    """Get the path to the Python interpreter in the virtual environment"""
     if sys.platform == "win32":
         return VENV_PATH / "Scripts" / "python.exe"
     return VENV_PATH / "bin" / "python"
 
 
-def run_in_venv() -> None:
-    """Re-execute this script inside the virtual environment"""
-    venv_python = get_venv_python()
+def check_qemu_installed() -> bool:
+    try:
+        subprocess.run(["qemu-system-x86_64", "--version"], capture_output=True, check=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
 
+
+def is_vm_running() -> bool:
+    return Path(QMP_SOCKET).exists()
+
+
+def start_vm() -> subprocess.Popen | None:
+    global qemu_process
+
+    if is_vm_running():
+        print(f"✅ VM already running (QMP: {QMP_SOCKET})")
+        return None
+
+    if not VM_DISK.exists():
+        print(f"⚠️  VM disk not found: {VM_DISK}")
+        print(f"   Create one with: qemu-img create -f qcow2 {VM_DISK} 20G")
+        print("   Running in demo mode (no VM)")
+        return None
+
+    if not check_qemu_installed():
+        print("⚠️  QEMU not installed. Running in demo mode.")
+        print("   Install with: sudo pacman -S qemu-full")
+        return None
+
+    print(f"🖥️  Starting VM: {VM_NAME}")
+
+    Path(QMP_SOCKET).unlink(missing_ok=True)
+
+    qemu_process = subprocess.Popen(
+        [
+            "qemu-system-x86_64",
+            "-name",
+            VM_NAME,
+            "-m",
+            os.environ.get("VM_MEMORY", "4096"),
+            "-smp",
+            os.environ.get("VM_CPUS", "2"),
+            "-hda",
+            str(VM_DISK),
+            "-qmp",
+            f"unix:{QMP_SOCKET},server,nowait",
+            "-device",
+            "virtio-vga",
+            "-usb",
+            "-device",
+            "usb-tablet",
+            "-display",
+            "gtk",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+    for _ in range(50):
+        if Path(QMP_SOCKET).exists():
+            print(f"✅ VM started (QMP: {QMP_SOCKET})")
+            return qemu_process
+        time.sleep(0.1)
+
+    print("⚠️  VM started but QMP socket not ready")
+    return qemu_process
+
+
+def cleanup_vm():
+    global qemu_process
+    if qemu_process:
+        print("\n🛑 Stopping VM...")
+        qemu_process.terminate()
+        try:
+            qemu_process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            qemu_process.kill()
+        qemu_process = None
+
+
+def run_in_venv() -> None:
+    venv_python = get_venv_python()
     if not venv_python.exists():
         print("❌ Virtual environment Python not found")
         sys.exit(1)
-
-    # Re-execute with the venv Python
     os.execv(str(venv_python), [str(venv_python), __file__, "--in-venv"] + sys.argv[1:])
 
 
 def main() -> None:
-    """Main entry point"""
-    # Check if we're already in the venv
     in_venv = "--in-venv" in sys.argv
 
     if not in_venv:
-        # First run: setup environment
         print("🤖 40Agent - AI VM Controller")
         print("=" * 40)
 
-        # Check/install uv
         if not check_uv_installed():
             install_uv()
-            # Re-check after installation
             if not check_uv_installed():
                 print("❌ uv still not found after installation. Please restart your shell.")
                 sys.exit(1)
 
-        # Setup environment if needed
         venv_python = get_venv_python()
         if not venv_python.exists() or not UV_LOCK.exists():
             setup_environment()
 
-        # Re-run in venv
         run_in_venv()
     else:
-        # Remove the --in-venv flag from args
         sys.argv.remove("--in-venv")
 
-        # Now we're in the venv, import and run the actual application
+        atexit.register(cleanup_vm)
+        signal.signal(signal.SIGINT, lambda s, f: sys.exit(0))
+        signal.signal(signal.SIGTERM, lambda s, f: sys.exit(0))
+
+        start_vm()
+
         from src.server.app import run_server
 
         run_server()

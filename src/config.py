@@ -35,6 +35,7 @@ class Settings(BaseSettings):
 
     # VM settings
     vm_name: str = "40agent-vm"
+    vm_qmp_socket: str = "/tmp/qemu-40agent-vm-qmp.sock"
     vm_native_width: int = 1920
     vm_native_height: int = 1080
     vm_native_fps: int = 30

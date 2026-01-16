@@ -6,7 +6,7 @@ AI Agent that can see and control virtual machines using Qwen3-omni multimodal m
 
 - **Real-time VM Vision**: Continuously captures VM screen at 480p 12fps for AI perception
 - **Multimodal AI**: Uses Qwen3-omni-flash-realtime for vision, audio input/output
-- **VM Control**: Mouse movement, clicking, keyboard input via QEMU/libvirt
+- **VM Control**: Mouse movement, clicking, keyboard input via QEMU QMP
 - **Web Interface**: Full-screen VM display with chat overlay (port 8040)
 - **Avatar System**: Inochi2D avatar with motion control
 - **Autonomous Operation**: Agent runs continuously, taking actions without waiting
@@ -18,11 +18,14 @@ AI Agent that can see and control virtual machines using Qwen3-omni multimodal m
 cp .env.example .env
 # .env 파일 열어서 DASHSCOPE_API_KEY 입력
 
-# 2. 실행 - 자동으로 환경 설정됨
+# 2. QEMU VM 시작 (별도 터미널)
+./scripts/start-vm.sh
+
+# 3. 40Agent 실행
 python run.py
 ```
 
-That's it! The script will:
+The script will:
 1. Install `uv` if not present
 2. Create virtual environment
 3. Install all dependencies
@@ -31,20 +34,20 @@ That's it! The script will:
 ## Requirements
 
 - Python 3.11+
-- QEMU/libvirt (for VM control)
+- QEMU (qemu-full)
 - `.env` file with DASHSCOPE_API_KEY
 
 ### System Dependencies
 
 ```bash
-# Ubuntu/Debian
-sudo apt install libvirt-dev portaudio19-dev
-
 # Arch Linux
-sudo pacman -S libvirt portaudio
+sudo pacman -S qemu-full portaudio
+
+# Ubuntu/Debian
+sudo apt install qemu-system-x86 portaudio19-dev
 
 # macOS
-brew install libvirt portaudio
+brew install qemu portaudio
 ```
 
 ## Configuration
@@ -61,6 +64,7 @@ DASHSCOPE_API_KEY=sk-your-api-key-here
 
 # Optional
 VM_NAME=40agent-vm
+VM_QMP_SOCKET=/tmp/qemu-40agent-vm-qmp.sock
 SERVER_PORT=8040
 OMNI_VOICE=Chelsie
 ```
@@ -116,30 +120,50 @@ The agent uses these tools (in XML format):
 
 ## VM Setup
 
-### Creating a VM
+### Starting QEMU VM
 
-1. Download pearOS-NiceC0re-25-12 ISO
-2. Create VM with libvirt:
+40Agent connects to QEMU via QMP socket. Start your VM with QMP enabled:
 
 ```bash
-virt-install \
-  --name 40agent-vm \
-  --ram 4096 \
-  --vcpus 2 \
-  --disk size=20 \
-  --cdrom pearOS-NiceC0re-25-12.iso \
-  --os-variant archlinux \
-  --graphics spice
+qemu-system-x86_64 \
+  -name 40agent-vm \
+  -m 4096 \
+  -smp 2 \
+  -hda vm_data/40agent-vm.qcow2 \
+  -qmp unix:/tmp/qemu-40agent-vm-qmp.sock,server,nowait \
+  -device virtio-vga \
+  -display gtk
 ```
 
-3. Install the OS and start the VM
+Or use the helper script:
+
+```bash
+./scripts/start-vm.sh
+```
+
+### Creating a New VM
+
+```bash
+# Create disk image
+qemu-img create -f qcow2 vm_data/40agent-vm.qcow2 20G
+
+# Install from ISO
+qemu-system-x86_64 \
+  -name 40agent-vm \
+  -m 4096 \
+  -smp 2 \
+  -hda vm_data/40agent-vm.qcow2 \
+  -cdrom pearOS-NiceC0re-25-12.iso \
+  -boot d \
+  -qmp unix:/tmp/qemu-40agent-vm-qmp.sock,server,nowait \
+  -device virtio-vga \
+  -display gtk
+```
 
 ### VM Configuration
 
-The VM should be:
-- Name: `40agent-vm` (or change in config)
 - Resolution: 1920x1080
-- Graphics: SPICE or VNC
+- QMP socket: `/tmp/qemu-40agent-vm-qmp.sock`
 
 ## API Reference
 
@@ -174,7 +198,7 @@ uv run ruff check src
 
 ### Video Pipeline
 
-1. VM screen captured via libvirt screendump (1920x1080 @ 30fps)
+1. VM screen captured via QEMU QMP screendump (1920x1080 @ 30fps)
 2. Downscaled to 480p @ 12fps for AI input
 3. Full resolution streamed to web at 30fps
 4. JPEG encoding for both streams

@@ -1,12 +1,15 @@
 """
-VM Controller - QEMU/libvirt integration for VM control
+VM Controller - Direct QEMU QMP integration for VM control
 """
 
 import asyncio
+import json
 import logging
+import socket
 from typing import Any
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +20,6 @@ class MouseButton(Enum):
     RIGHT = 4
 
 
-# Key mapping for special keys
 KEY_MAP = {
     "enter": "ret",
     "return": "ret",
@@ -61,8 +63,6 @@ KEY_MAP = {
 
 @dataclass
 class VMState:
-    """Current state of the VM"""
-
     is_running: bool = False
     cursor_x: int = 0
     cursor_y: int = 0
@@ -72,80 +72,79 @@ class VMState:
 
 class VMController:
     """
-    Controller for QEMU/libvirt VMs
-    Provides cursor movement, clicking, keyboard input
+    Controller for QEMU VMs via direct QMP socket connection.
+    No libvirt required - just qemu-full.
     """
 
-    def __init__(self, vm_name: str = "40agent-vm"):
+    def __init__(self, vm_name: str = "40agent-vm", qmp_socket: str | None = None):
         self.vm_name = vm_name
-        self._conn = None
-        self._domain = None
+        self.qmp_socket = qmp_socket or f"/tmp/qemu-{vm_name}-qmp.sock"
+        self._sock: socket.socket | None = None
         self._state = VMState()
         self._lock = asyncio.Lock()
+        self._reader: asyncio.StreamReader | None = None
+        self._writer: asyncio.StreamWriter | None = None
 
     async def connect(self) -> bool:
-        """Connect to libvirt and get VM domain"""
         try:
-            import libvirt
-
-            # Connect to QEMU system
-            self._conn = libvirt.open("qemu:///system")
-            if self._conn is None:
-                logger.error("Failed to connect to QEMU")
+            sock_path = Path(self.qmp_socket)
+            if not sock_path.exists():
+                logger.warning(
+                    f"QMP socket not found: {self.qmp_socket}. Running in simulation mode."
+                )
+                logger.info(f"Start QEMU with: -qmp unix:{self.qmp_socket},server,nowait")
                 return False
 
-            # Look up the domain
-            try:
-                self._domain = self._conn.lookupByName(self.vm_name)
-                self._state.is_running = self._domain.isActive()
-                logger.info(f"Connected to VM: {self.vm_name}, running: {self._state.is_running}")
-                return True
-            except libvirt.libvirtError:
-                logger.warning(f"VM '{self.vm_name}' not found. Will run in simulation mode.")
-                return False
+            self._reader, self._writer = await asyncio.open_unix_connection(self.qmp_socket)
 
-        except ImportError:
-            logger.warning("libvirt-python not installed. Running in simulation mode.")
-            return False
+            greeting = await self._reader.readline()
+            logger.debug(f"QMP greeting: {greeting.decode()}")
+
+            await self._send_qmp_command("qmp_capabilities")
+
+            self._state.is_running = True
+            logger.info(f"Connected to QEMU via QMP: {self.qmp_socket}")
+            return True
+
         except Exception as e:
-            logger.error(f"Failed to connect to VM: {e}")
+            logger.error(f"Failed to connect to QMP: {e}")
             return False
 
     async def disconnect(self) -> None:
-        """Disconnect from libvirt"""
-        if self._conn:
-            self._conn.close()
-            self._conn = None
-            self._domain = None
+        if self._writer:
+            self._writer.close()
+            await self._writer.wait_closed()
+            self._writer = None
+            self._reader = None
 
     async def _send_qmp_command(self, command: str, **kwargs) -> Any:
-        """Send QMP command to QEMU (via libvirt)"""
-        if not self._domain:
+        if not self._writer or not self._reader:
             logger.debug(f"Simulation: QMP command {command} with {kwargs}")
             return {"return": {}}
 
         try:
-            import json
+            cmd = {"execute": command}
+            if kwargs:
+                cmd["arguments"] = kwargs
 
-            cmd = {"execute": command, "arguments": kwargs} if kwargs else {"execute": command}
-            result = self._domain.qemuMonitorCommand(json.dumps(cmd), 0)
-            return json.loads(result)
+            self._writer.write(json.dumps(cmd).encode() + b"\n")
+            await self._writer.drain()
+
+            response = await self._reader.readline()
+            return json.loads(response.decode())
         except Exception as e:
             logger.error(f"QMP command failed: {e}")
             return None
 
     async def move_cursor(self, x: int, y: int) -> None:
-        """Move cursor to absolute position"""
         async with self._lock:
-            # Clamp coordinates
             x = max(0, min(x, self._state.screen_width - 1))
             y = max(0, min(y, self._state.screen_height - 1))
 
             self._state.cursor_x = x
             self._state.cursor_y = y
 
-            if self._domain:
-                # Use input-send-event for absolute positioning
+            if self._writer:
                 await self._send_qmp_command(
                     "input-send-event",
                     events=[
@@ -157,22 +156,13 @@ class VMController:
                 logger.debug(f"Simulation: Move cursor to ({x}, {y})")
 
     async def click(self, button: str = "left") -> None:
-        """Click mouse button"""
         async with self._lock:
-            button_code = {
-                "left": 0,
-                "middle": 1,
-                "right": 2,
-            }.get(button.lower(), 0)
-
-            if self._domain:
-                # Press
+            if self._writer:
                 await self._send_qmp_command(
                     "input-send-event",
                     events=[{"type": "btn", "data": {"button": f"mouse_{button}", "down": True}}],
                 )
                 await asyncio.sleep(0.05)
-                # Release
                 await self._send_qmp_command(
                     "input-send-event",
                     events=[{"type": "btn", "data": {"button": f"mouse_{button}", "down": False}}],
@@ -183,16 +173,13 @@ class VMController:
                 )
 
     async def type_text(self, text: str) -> None:
-        """Type text character by character"""
         async with self._lock:
             for char in text:
                 await self._send_key(char)
-                await asyncio.sleep(0.02)  # Small delay between characters
+                await asyncio.sleep(0.02)
 
     async def _send_key(self, key: str, hold: bool = False) -> None:
-        """Send a single key press"""
-        if self._domain:
-            # Map special characters
+        if self._writer:
             qcode = KEY_MAP.get(key.lower(), key)
 
             await self._send_qmp_command(
@@ -216,30 +203,23 @@ class VMController:
             logger.debug(f"Simulation: Key press '{key}'")
 
     async def press_keys(self, keys: str) -> None:
-        """
-        Press key combination (e.g., "ctrl+c", "alt+tab")
-        """
         async with self._lock:
             parts = [k.strip() for k in keys.lower().split("+")]
 
-            # Press modifier keys first
             modifiers = []
             for part in parts:
                 if part in ("ctrl", "alt", "shift", "meta", "super", "win"):
                     modifiers.append(part)
 
-            # Hold modifiers
             for mod in modifiers:
                 await self._send_key(mod, hold=True)
 
-            # Press non-modifier keys
             for part in parts:
                 if part not in modifiers:
                     await self._send_key(part)
 
-            # Release modifiers
             for mod in reversed(modifiers):
-                if self._domain:
+                if self._writer:
                     qcode = KEY_MAP.get(mod, mod)
                     await self._send_qmp_command(
                         "input-send-event",
@@ -253,10 +233,8 @@ class VMController:
 
     @property
     def state(self) -> VMState:
-        """Get current VM state"""
         return self._state
 
     @property
     def is_connected(self) -> bool:
-        """Check if connected to VM"""
-        return self._domain is not None
+        return self._writer is not None

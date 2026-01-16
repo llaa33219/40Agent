@@ -13,7 +13,7 @@ dependencies = [
     "pillow>=10.4.0",
     "opencv-python>=4.10.0.84",
     "numpy>=2.0.0",
-    "libvirt-python>=10.9.0",
+
     "aiofiles>=24.1.0",
     "python-multipart>=0.0.12",
     "pydantic>=2.9.0",

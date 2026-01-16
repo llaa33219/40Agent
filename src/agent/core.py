@@ -43,9 +43,13 @@ class Agent:
 
     def __init__(self):
         # Components
-        self.vm_controller = VMController(vm_name=settings.vm_name)
+        self.vm_controller = VMController(
+            vm_name=settings.vm_name,
+            qmp_socket=settings.vm_qmp_socket,
+        )
         self.vm_capture = VMScreenCapture(
             vm_name=settings.vm_name,
+            qmp_socket=settings.vm_qmp_socket,
             native_width=settings.vm_native_width,
             native_height=settings.vm_native_height,
             native_fps=settings.vm_native_fps,

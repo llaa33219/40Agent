@@ -18,7 +18,6 @@ dependencies = [
     { name = "aiofiles" },
     { name = "dashscope" },
     { name = "fastapi" },
-    { name = "libvirt-python" },
     { name = "numpy" },
     { name = "opencv-python" },
     { name = "pillow" },
@@ -42,7 +41,6 @@ requires-dist = [
     { name = "aiofiles", specifier = ">=24.1.0" },
     { name = "dashscope", specifier = ">=1.23.9" },
     { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "libvirt-python", specifier = ">=10.9.0" },
     { name = "numpy", specifier = ">=2.0.0" },
     { name = "opencv-python", specifier = ">=4.10.0.84" },
     { name = "pillow", specifier = ">=10.4.0" },
@@ -663,12 +661,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/72/34/14ca021ce8e5dfedc
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl", hash = "sha256:f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12", size = 7484, upload-time = "2025-10-18T21:55:41.639Z" },
 ]
-
-[[package]]
-name = "libvirt-python"
-version = "12.0.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/5e/cd/a8fdd1c691f2a6a6dc8b0711b42473a7342e4d1a7a1e9ef90677a236eb73/libvirt_python-12.0.0.tar.gz", hash = "sha256:7b4de7d2dde2bc380cf4e108d1eeb8aad50beb3ae351ab9265a7fedc587742bc", size = 243300, upload-time = "2026-01-15T09:14:43.074Z" }
 
 [[package]]
 name = "multidict"

@@ -81,6 +81,28 @@ def check_qemu_installed() -> bool:
         return False
 
 
+def find_iso_file() -> Path | None:
+    iso_files = list(VM_DATA_DIR.glob("*.iso"))
+    if iso_files:
+        return iso_files[0]
+    return None
+
+
+def create_vm_disk(size_gb: int = 50) -> bool:
+    print(f"💾 Creating VM disk: {VM_DISK} ({size_gb}GB)")
+    try:
+        subprocess.run(
+            ["qemu-img", "create", "-f", "qcow2", str(VM_DISK), f"{size_gb}G"],
+            check=True,
+            capture_output=True,
+        )
+        print(f"✅ VM disk created: {VM_DISK}")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"❌ Failed to create VM disk: {e}")
+        return False
+
+
 def is_vm_running() -> bool:
     return Path(QMP_SOCKET).exists()
 
@@ -92,42 +114,58 @@ def start_vm() -> subprocess.Popen | None:
         print(f"✅ VM already running (QMP: {QMP_SOCKET})")
         return None
 
-    if not VM_DISK.exists():
-        print(f"⚠️  VM disk not found: {VM_DISK}")
-        print(f"   Create one with: qemu-img create -f qcow2 {VM_DISK} 20G")
-        print("   Running in demo mode (no VM)")
-        return None
-
     if not check_qemu_installed():
         print("⚠️  QEMU not installed. Running in demo mode.")
         print("   Install with: sudo pacman -S qemu-full")
         return None
 
+    iso_file = None
+    first_boot = False
+
+    if not VM_DISK.exists():
+        iso_file = find_iso_file()
+        if iso_file:
+            print(f"📀 Found ISO: {iso_file.name}")
+            if not create_vm_disk(size_gb=50):
+                return None
+            first_boot = True
+        else:
+            print(f"⚠️  VM disk not found: {VM_DISK}")
+            print(f"   Place an ISO file in {VM_DATA_DIR}/ to auto-create VM")
+            print("   Running in demo mode (no VM)")
+            return None
+
     print(f"🖥️  Starting VM: {VM_NAME}")
 
     Path(QMP_SOCKET).unlink(missing_ok=True)
 
+    qemu_cmd = [
+        "qemu-system-x86_64",
+        "-name",
+        VM_NAME,
+        "-m",
+        os.environ.get("VM_MEMORY", "16384"),  # 16GB RAM
+        "-smp",
+        os.environ.get("VM_CPUS", "2"),
+        "-hda",
+        str(VM_DISK),
+        "-qmp",
+        f"unix:{QMP_SOCKET},server,nowait",
+        "-device",
+        "virtio-vga,max_hostmem=268435456",  # 256MB VRAM
+        "-usb",
+        "-device",
+        "usb-tablet",
+        "-display",
+        "gtk",
+    ]
+
+    if first_boot and iso_file:
+        print(f"📀 Booting from ISO for installation...")
+        qemu_cmd.extend(["-cdrom", str(iso_file), "-boot", "d"])
+
     qemu_process = subprocess.Popen(
-        [
-            "qemu-system-x86_64",
-            "-name",
-            VM_NAME,
-            "-m",
-            os.environ.get("VM_MEMORY", "4096"),
-            "-smp",
-            os.environ.get("VM_CPUS", "2"),
-            "-hda",
-            str(VM_DISK),
-            "-qmp",
-            f"unix:{QMP_SOCKET},server,nowait",
-            "-device",
-            "virtio-vga",
-            "-usb",
-            "-device",
-            "usb-tablet",
-            "-display",
-            "gtk",
-        ],
+        qemu_cmd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -135,6 +173,8 @@ def start_vm() -> subprocess.Popen | None:
     for _ in range(50):
         if Path(QMP_SOCKET).exists():
             print(f"✅ VM started (QMP: {QMP_SOCKET})")
+            if first_boot:
+                print("📝 Note: Complete OS installation, then restart to boot from disk")
             return qemu_process
         time.sleep(0.1)
 

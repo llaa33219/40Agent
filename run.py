@@ -152,7 +152,7 @@ def start_vm() -> subprocess.Popen | None:
         "-qmp",
         f"unix:{QMP_SOCKET},server,nowait",
         "-device",
-        "virtio-vga,max_hostmem=268435456",  # 256MB VRAM
+        "virtio-vga,max_hostmem=1073741824",  # 1GB VRAM
         "-usb",
         "-device",
         "usb-tablet",

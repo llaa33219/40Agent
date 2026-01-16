@@ -114,22 +114,21 @@ class OmniCallback(OmniRealtimeCallback):
         if self.audio_player:
             self.audio_player.shutdown()
 
-    def on_event(self, response: dict) -> None:
+    def on_event(self, message: str) -> None:
         try:
-            event_type_str = response.get("type", "")
+            data = message if isinstance(message, dict) else json.loads(message)
+            event_type_str = data.get("type", "")
 
-            # Map to event type
             try:
                 event_type = EventType(event_type_str)
             except ValueError:
                 logger.debug(f"Unknown event type: {event_type_str}")
                 return
 
-            event = OmniEvent(event_type=event_type, data=response)
+            event = OmniEvent(event_type=event_type, data=data)
 
-            # Handle audio playback
             if event_type == EventType.AUDIO_DATA and self.audio_player:
-                audio_b64 = response.get("delta", "")
+                audio_b64 = data.get("delta", "")
                 if audio_b64:
                     self.audio_player.add_audio(audio_b64)
 
@@ -216,14 +215,6 @@ class OmniClient:
                 turn_detection_type="server_vad",
             )
 
-            # Set system prompt if provided
-            if self.system_prompt:
-                self._conversation.add_item(
-                    item_type="message",
-                    role="system",
-                    content=[{"type": "input_text", "text": self.system_prompt}],
-                )
-
             self._connected = True
             logger.info("Connected to Omni API")
             return True
@@ -302,17 +293,7 @@ class OmniClient:
             return
 
         try:
-            # Add video frame as image input
-            self._conversation.add_item(
-                item_type="message",
-                role="user",
-                content=[
-                    {
-                        "type": "input_image",
-                        "image": f"data:image/jpeg;base64,{frame_b64}",
-                    }
-                ],
-            )
+            self._conversation.append_video(frame_b64)
         except Exception as e:
             logger.error(f"Failed to send video frame: {e}")
 
@@ -322,13 +303,10 @@ class OmniClient:
             return
 
         try:
-            self._conversation.add_item(
-                item_type="message",
-                role="user",
-                content=[{"type": "input_text", "text": text}],
-            )
-            # Trigger response
-            self._conversation.create_response()
+            instructions = text
+            if self.system_prompt:
+                instructions = f"{self.system_prompt}\n\nUser: {text}"
+            self._conversation.create_response(instructions=instructions)
         except Exception as e:
             logger.error(f"Failed to send text: {e}")
 
